@@ -98,6 +98,12 @@ td input.low{color:var(--merah);font-weight:700;border-color:var(--merah)}
 .drop input{display:none}
 .scroll{max-height:320px;overflow:auto;border:1.5px solid var(--garis);border-radius:var(--radius)}
 .scroll table{min-width:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1.5px solid var(--garis);background:#fff;border-radius:99px;padding:5px 14px;font-weight:600;color:var(--abu)}
+.chip:hover{border-color:var(--papan)}
+.chip.on{background:var(--papan);border-color:var(--papan);color:#fff}
+.chip:disabled{opacity:.4;cursor:default}
+td .note-in{width:100%;min-width:160px;margin-top:4px;font-size:13px;text-align:left}
 .steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .steps span{font-size:13px;padding:3px 10px;border-radius:99px;background:var(--kapur)}
 .steps span.on{background:var(--papan);color:#fff}
@@ -150,6 +156,11 @@ const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s
 const pad=n=>String(n).padStart(2,'0');
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())};
 const fmt=n=>n==null?'–':(Math.round(n*10)/10).toString().replace('.',',');
+const JENIS=['Tugas','Kuis','UH','PTS','PAS','Praktik','Sikap','Catatan'];
+const aTypes=a=>a.types&&a.types.length?a.types:[a.type||'Tugas'];
+const isScored=a=>aTypes(a).some(t=>t!=='Catatan');
+const hasNote=a=>aTypes(a).includes('Catatan');
+const noOf=(s,i)=>s.nis||String(i+1);
 let toastT;
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2400)}
 function download(name,text,type='text/csv'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)}
@@ -160,8 +171,8 @@ const KEY='kelasku.v1';
 function seed(){
   const c1={id:'k7a',name:'VII A'},c2={id:'k8a',name:'VIII A'};
   const names=['Aditya Pratama','Bunga Lestari','Citra Maharani','Dimas Saputra','Eka Wulandari','Farhan Hakim','Gita Anjani','Hendra Wijaya','Indah Permata','Joko Santoso'];
-  const students=names.map((n,i)=>({id:'s'+i,nis:'2024'+pad(i+1)+'0',name:n,classId:'k7a'}));
-  ['Kartika Sari','Lutfi Ramadhan','Mega Putri'].forEach((n,i)=>students.push({id:'t'+i,nis:'2023'+pad(i+1)+'0',name:n,classId:'k8a'}));
+  const students=names.map((n,i)=>({id:'s'+i,nis:String(i+1),name:n,classId:'k7a'}));
+  ['Kartika Sari','Lutfi Ramadhan','Mega Putri'].forEach((n,i)=>students.push({id:'t'+i,nis:String(i+1),name:n,classId:'k8a'}));
   const as=[{id:'a1',classId:'k7a',subject:'Informatika',name:'Kuis 1',type:'Kuis',weight:15,source:'manual',manual:{}},
             {id:'a2',classId:'k7a',subject:'Informatika',name:'Tugas Praktik',type:'Tugas',weight:25,source:'manual',manual:{}},
             {id:'a3',classId:'k7a',subject:'Informatika',name:'UH 1',type:'UH',weight:60,source:'manual',manual:{}}];
@@ -170,15 +181,17 @@ function seed(){
   students.filter(s=>s.classId==='k7a').forEach((s,i)=>{scores.a1[s.id]=base[i];scores.a2[s.id]=Math.min(100,base[i]+((i*7)%11)-4);scores.a3[s.id]=Math.min(100,base[i]+((i*5)%9)-5)});
   return {classes:[c1,c2],students,subjects:['Informatika','Matematika','IPA'],assessments:as,scores,attendance:{},kkm:75,clientId:''};
 }
-function load(){try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r)}catch(e){}return seed()}
+function fixS(o){o.notes=o.notes||{};(o.assessments||[]).forEach(a=>{if(!a.types)a.types=[a.type||'Tugas']});return o}
+function load(){try{const r=localStorage.getItem(KEY);if(r)return fixS(JSON.parse(r))}catch(e){}return fixS(seed())}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 let S=load();
  
 /* ============ Hitungan ============ */
-const clsStudents=id=>S.students.filter(s=>s.classId===id).sort((a,b)=>a.name.localeCompare(b.name));
+const clsStudents=id=>S.students.filter(s=>s.classId===id).sort((a,b)=>{const x=parseFloat(a.nis),y=parseFloat(b.nis);if(!isNaN(x)&&!isNaN(y)&&x!==y)return x-y;return a.name.localeCompare(b.name)});
 function finalGrade(cid,subj,sid){
   let w=0,t=0;
   S.assessments.filter(a=>a.classId===cid&&a.subject===subj).forEach(a=>{
+    if(!isScored(a))return;
     const v=S.scores[a.id]?.[sid]; if(v!=null&&v!==''){w+=a.weight;t+=v*a.weight}
   });
   return w?t/w:null;
@@ -242,9 +255,9 @@ dashboard(){
  
 absensi(){
   const st=clsStudents(V.classId),key=V.classId+'|'+V.date,rec=S.attendance[key];
-  const rows=st.map(s=>{const cur=rec?.[s.id]||'H';return `<tr><td>${esc(s.name)}<div class="muted small">${esc(s.nis)}</div></td>
+  const rows=st.map((s,i)=>{const cur=rec?.[s.id]||'H';return `<tr><td class="num muted" style="width:46px">${noOf(s,i)}</td><td>${esc(s.name)}</td>
     <td><div class="stamps">${['H','I','S','A'].map(x=>`<button data-s="${x}" class="${cur===x?'on':''}" onclick="setAtt('${s.id}','${x}')" aria-label="${{H:'Hadir',I:'Izin',S:'Sakit',A:'Alpa'}[x]}">${x}</button>`).join('')}</div></td></tr>`}).join('');
-  const rk=st.map(s=>({s,a:attStats(V.classId,s.id,V.month)}));
+  const rk=st.map((s,i)=>({s,i,a:attStats(V.classId,s.id,V.month)}));
   return `
   <div class="panel">
     <div class="row">
@@ -254,13 +267,13 @@ absensi(){
     </div>
     <p class="muted small" style="margin:8px 0 0">H = Hadir, I = Izin, S = Sakit, A = Alpa. Setiap ketukan langsung tersimpan.</p>
   </div>
-  ${st.length?`<div class="tbl-wrap"><table><thead><tr><th>Murid</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="empty">Kelas ini belum punya murid.</div>`}
+  ${st.length?`<div class="tbl-wrap"><table><thead><tr><th class="num">No</th><th>Murid</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="empty">Kelas ini belum punya murid.</div>`}
   <div class="panel" style="margin-top:16px">
     <div class="row"><h2 style="margin-right:auto">Rekap bulanan</h2>
       <label style="flex:0 1 170px">Bulan<input type="month" value="${V.month}" onchange="V.month=this.value;render()"></label>
       <button class="btn ghost" onclick="exportAbsen()">Ekspor CSV</button></div>
-    <div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>Murid</th><th class="num">H</th><th class="num">I</th><th class="num">S</th><th class="num">A</th><th class="num">% Hadir</th></tr></thead><tbody>
-    ${rk.map(({s,a})=>`<tr><td>${esc(s.name)}</td><td class="num">${a.H}</td><td class="num">${a.I}</td><td class="num">${a.S}</td><td class="num">${a.A}</td>
+    <div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th class="num">No</th><th>Murid</th><th class="num">H</th><th class="num">I</th><th class="num">S</th><th class="num">A</th><th class="num">% Hadir</th></tr></thead><tbody>
+    ${rk.map(({s,a,i})=>`<tr><td class="num muted">${noOf(s,i)}</td><td>${esc(s.name)}</td><td class="num">${a.H}</td><td class="num">${a.I}</td><td class="num">${a.S}</td><td class="num">${a.A}</td>
       <td class="num fin ${a.pct!=null&&a.pct<85?'low':''}">${a.pct==null?'–':fmt(a.pct)+'%'}</td></tr>`).join('')}
     </tbody></table></div>
   </div>`;
@@ -268,33 +281,41 @@ absensi(){
  
 nilai(){
   const st=clsStudents(V.classId),as=S.assessments.filter(a=>a.classId===V.classId&&a.subject===V.subject);
-  const tw=as.reduce((x,a)=>x+a.weight,0);
+  const tw=as.filter(isScored).reduce((x,a)=>x+a.weight,0);
   const fgs=st.map(s=>finalGrade(V.classId,V.subject,s.id));
   const ok=fgs.filter(v=>v!=null);const avg=ok.length?ok.reduce((a,b)=>a+b,0)/ok.length:null;
+  const sel=V.newTypes,onlyNote=sel.length===1&&sel[0]==='Catatan';
+  const hint=onlyNote?'Hanya catatan: kolom berisi teks per murid, tanpa angka dan tidak masuk nilai akhir.'
+    :sel.includes('Catatan')?'Kolom berisi nilai dan juga kolom catatan per murid.':sel.length===2?'Satu kolom nilai dengan dua jenis, misalnya Tugas + Praktik.':'Kolom berisi nilai.';
   return `
   <div class="panel">
     <h2>Tambah penilaian</h2>
     <div class="row">
-      <label style="flex:2 1 180px">Nama<input type="text" id="nName" placeholder="mis. Kuis 2"></label>
-      <label>Jenis<select id="nType" style="width:100%"><option>Tugas</option><option>Kuis</option><option>UH</option><option>PTS</option><option>PAS</option><option>Praktik</option><option>Sikap</option></select></label>
-      <label style="flex:0 1 100px">Bobot (%)<input type="number" id="nW" value="10" min="1" max="100"></label>
+      <label style="flex:2 1 180px">Nama<input type="text" id="nName" value="${esc(V.newName)}" oninput="V.newName=this.value" placeholder="mis. Kuis 2"></label>
+      <label style="flex:0 1 110px">Bobot (%)<input type="number" id="nW" value="${V.newW}" min="1" max="100" oninput="V.newW=this.value" ${onlyNote?'disabled':''}></label>
       <button class="btn" onclick="addAssess()">Tambah</button>
+    </div>
+    <div style="margin-top:12px">
+      <div class="small muted" style="margin-bottom:5px">Jenis (pilih satu atau dua)</div>
+      <div class="chips">${JENIS.map(j=>`<button type="button" class="chip ${sel.includes(j)?'on':''}" ${!sel.includes(j)&&sel.length>=2?'disabled':''} onclick="toggleType('${j}')">${j}</button>`).join('')}</div>
+      <p class="muted small" style="margin:6px 0 0">${hint}</p>
     </div>
   </div>
   ${as.length?`
   <div class="row" style="margin-bottom:8px"><span class="muted small" style="margin-right:auto">KKM ${S.kkm} · total bobot <b ${tw!==100?'style="color:var(--merah)"':''}>${tw}%</b>${tw!==100?' (idealnya 100%)':''}</span>
     <button class="btn ghost sm" onclick="exportNilai()">Ekspor CSV</button></div>
-  <div class="tbl-wrap"><table><thead><tr><th>Murid</th>
-    ${as.map(a=>`<th class="num">${esc(a.name)}<div class="small muted" style="font-weight:400">${esc(a.type)} ${a.source==='google_form'?'<span class="badge">Form</span>':''}</div>
-      <div style="display:flex;gap:3px;justify-content:center;align-items:center;margin-top:3px"><input class="tiny-in" type="number" min="1" max="100" value="${a.weight}" onchange="setW('${a.id}',this.value)" aria-label="Bobot ${esc(a.name)}">%
+  <div class="tbl-wrap"><table><thead><tr><th class="num" style="width:46px">No</th><th>Murid</th>
+    ${as.map(a=>`<th class="num" ${hasNote(a)?'style="min-width:200px"':''}>${esc(a.name)}<div class="small muted" style="font-weight:400">${aTypes(a).map(esc).join(' + ')} ${a.source==='google_form'?'<span class="badge">Form</span>':''}</div>
+      <div style="display:flex;gap:3px;justify-content:center;align-items:center;margin-top:3px">${isScored(a)?`<input class="tiny-in" type="number" min="1" max="100" value="${a.weight}" onchange="setW('${a.id}',this.value)" aria-label="Bobot ${esc(a.name)}">%`:''}
       <button class="btn danger sm" style="padding:0 6px;min-height:24px" onclick="delAssess('${a.id}')" aria-label="Hapus ${esc(a.name)}">×</button></div></th>`).join('')}
     <th class="num">Nilai akhir</th></tr></thead><tbody>
-    ${st.map((s,i)=>`<tr><td>${esc(s.name)}</td>
-      ${as.map(a=>{const v=S.scores[a.id]?.[s.id];return `<td class="num"><input type="number" min="0" max="100" step="any" value="${v??''}" class="${v!=null&&v!==''&&v<S.kkm?'low':''}" onchange="setScore('${a.id}','${s.id}',this.value)" aria-label="${esc(s.name)} ${esc(a.name)}"></td>`}).join('')}
+    ${st.map((s,i)=>`<tr><td class="num muted">${noOf(s,i)}</td><td>${esc(s.name)}</td>
+      ${as.map(a=>{const v=S.scores[a.id]?.[s.id];const n=S.notes?.[a.id]?.[s.id]||'';
+        return `<td class="num">${isScored(a)?`<input type="number" min="0" max="100" step="any" value="${v??''}" class="${v!=null&&v!==''&&v<S.kkm?'low':''}" onchange="setScore('${a.id}','${s.id}',this.value)" aria-label="${esc(s.name)} ${esc(a.name)}">`:''}${hasNote(a)?`<input type="text" class="note-in" value="${esc(n)}" placeholder="Catatan" onchange="setNote('${a.id}','${s.id}',this.value)" aria-label="Catatan ${esc(s.name)} ${esc(a.name)}">`:''}</td>`}).join('')}
       <td class="num fin ${fgs[i]!=null&&fgs[i]<S.kkm?'low':''}">${fmt(fgs[i])}</td></tr>`).join('')}
-    <tr><td><b>Rata-rata kelas</b></td>${as.map(a=>{const vs=st.map(s=>S.scores[a.id]?.[s.id]).filter(v=>v!=null&&v!=='');return `<td class="num muted">${vs.length?fmt(vs.reduce((x,y)=>x+y,0)/vs.length):'–'}</td>`}).join('')}<td class="num fin">${fmt(avg)}</td></tr>
+    <tr><td></td><td><b>Rata-rata kelas</b></td>${as.map(a=>{if(!isScored(a))return '<td></td>';const vs=st.map(s=>S.scores[a.id]?.[s.id]).filter(v=>v!=null&&v!=='');return `<td class="num muted">${vs.length?fmt(vs.reduce((x,y)=>x+y,0)/vs.length):'–'}</td>`}).join('')}<td class="num fin">${fmt(avg)}</td></tr>
   </tbody></table></div>
-  <p class="muted small">Nilai akhir = rata-rata tertimbang dari penilaian yang sudah terisi. Angka merah berarti di bawah KKM.</p>`
+  <p class="muted small">Nilai akhir = rata-rata tertimbang dari penilaian bernilai yang sudah terisi. Kolom catatan tidak ikut dihitung. Angka merah berarti di bawah KKM.</p>`
   :`<div class="empty">Belum ada penilaian untuk ${esc(V.subject)} di kelas ini. Tambahkan di atas, atau impor dari Google Form.</div>`}`;
 },
  
@@ -346,21 +367,21 @@ data(){
     ${S.classes.length?`<button class="btn danger" onclick="delClass()">Hapus kelas terpilih</button>`:''}</div>
   </div>
   <div class="panel"><h2>Murid ${sel?`di ${esc(S.classes.find(c=>c.id===sel)?.name)}`:''}</h2>
-    ${sel?`<div class="row"><label>NIS<input type="text" id="sNis"></label><label style="flex:2 1 200px">Nama<input type="text" id="sName"></label><button class="btn" onclick="addStudent()">Tambah murid</button></div>
+    ${sel?`<div class="row"><label style="flex:0 1 100px">No<input type="text" id="sNis" placeholder="otomatis"></label><label style="flex:2 1 200px">Nama<input type="text" id="sName"></label><button class="btn" onclick="addStudent()">Tambah murid</button></div>
     <div style="margin-top:14px">
       <label class="drop" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="event.preventDefault();this.classList.remove('over');readStudentFile(event.dataTransfer.files[0])">
         <b>Unggah daftar murid dari file</b>
         <span class="muted small">Seret file ke sini atau klik untuk memilih. Mendukung Excel (.xlsx, .xls) dan CSV.</span>
         <input type="file" accept=".xlsx,.xls,.csv,.txt,.tsv" onchange="readStudentFile(this.files[0])">
       </label>
-      <p class="muted small" style="margin:8px 0 0">Kolom yang dibaca: <b>NIS</b> dan <b>Nama</b> (judul kolom boleh ada atau tidak). Murid masuk ke kelas yang sedang dipilih. <a href="#" onclick="downloadStudentTemplate();return false">Unduh templat CSV</a></p>
+      <p class="muted small" style="margin:8px 0 0">Kolom yang dibaca: <b>No</b> (nomor) dan <b>Nama</b>, judul kolom boleh ada atau tidak. Jika tidak ada nomor, murid dinomori otomatis sesuai urutan. Murid masuk ke kelas yang sedang dipilih. <a href="#" onclick="downloadStudentTemplate();return false">Unduh templat CSV</a></p>
       ${stuPreviewHTML()}
     </div>
-    <label class="muted small" style="display:block;margin-top:14px">Atau tempel banyak murid sekaligus, satu baris satu murid, format <b>NIS,Nama</b>
-      <textarea id="bulk" placeholder="2024010,Aditya Pratama&#10;2024020,Bunga Lestari"></textarea></label>
+    <label class="muted small" style="display:block;margin-top:14px">Atau tempel banyak murid sekaligus, satu baris satu murid, format <b>No,Nama</b>
+      <textarea id="bulk" placeholder="1,Aditya Pratama&#10;2,Bunga Lestari"></textarea></label>
     <div style="margin:8px 0 12px"><button class="btn ghost" onclick="bulkStudents()">Impor daftar</button></div>
-    <div class="tbl-wrap"><table><thead><tr><th>NIS</th><th>Nama</th><th></th></tr></thead><tbody>
-    ${clsStudents(sel).map(s=>`<tr><td>${esc(s.nis)}</td><td>${esc(s.name)}</td><td style="text-align:right"><button class="btn danger sm" onclick="delStudent('${s.id}')">Hapus</button></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Belum ada murid.</td></tr>'}
+    <div class="tbl-wrap"><table><thead><tr><th class="num" style="width:50px">No</th><th>Nama</th><th></th></tr></thead><tbody>
+    ${clsStudents(sel).map((s,i)=>`<tr><td class="num">${noOf(s,i)}</td><td>${esc(s.name)}</td><td style="text-align:right"><button class="btn danger sm" onclick="delStudent('${s.id}')">Hapus</button></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Belum ada murid.</td></tr>'}
     </tbody></table></div>`:'<p class="muted">Tambahkan kelas terlebih dahulu.</p>'}
   </div>
   <div class="panel"><h2>Pengaturan</h2>
@@ -385,7 +406,7 @@ function importPreview(){
       <label style="flex:1 1 170px">Jika mengerjakan lebih dari sekali<select style="width:100%" onchange="V.im.policy=this.value;render()">
         <option value="max" ${im.policy==='max'?'selected':''}>Pakai nilai tertinggi</option><option value="last" ${im.policy==='last'?'selected':''}>Pakai yang terakhir</option><option value="first" ${im.policy==='first'?'selected':''}>Pakai yang pertama</option></select></label>
     </div>
-    <p class="muted small" style="margin:10px 0 0">Skor diubah ke skala 0–100 (skor maksimum form: ${fmt(im.max)}). Pencocokan: NIS dulu, lalu nama.</p>
+    <p class="muted small" style="margin:10px 0 0">Skor diubah ke skala 0–100 (skor maksimum form: ${fmt(im.max)}). Pencocokan: nomor absen dulu, lalu nama.</p>
   </div>
   <div class="stats">
     <div class="stat"><b>${rows.length}</b><span>respons diterima</span></div>
@@ -415,19 +436,29 @@ function allHadir(){
   const key=V.classId+'|'+V.date;S.attendance[key]={};clsStudents(V.classId).forEach(s=>S.attendance[key][s.id]='H');save();render();toast('Absensi tersimpan: semua hadir');
 }
 function exportAbsen(){
-  const rows=[['Nama','NIS','Hadir','Izin','Sakit','Alpa','% Hadir']];
-  clsStudents(V.classId).forEach(s=>{const a=attStats(V.classId,s.id,V.month);rows.push([s.name,s.nis,a.H,a.I,a.S,a.A,a.pct==null?'':fmt(a.pct)])});
+  const rows=[['No','Nama','Hadir','Izin','Sakit','Alpa','% Hadir']];
+  clsStudents(V.classId).forEach((s,i)=>{const a=attStats(V.classId,s.id,V.month);rows.push([noOf(s,i),s.name,a.H,a.I,a.S,a.A,a.pct==null?'':fmt(a.pct)])});
   download(`rekap-absen-${V.month}.csv`,rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
  
+function toggleType(j){
+  const t=V.newTypes,i=t.indexOf(j);
+  if(i>=0){if(t.length>1)t.splice(i,1)}else if(t.length<2)t.push(j);
+  render();
+}
 function addAssess(){
-  const name=$('#nName').value.trim();if(!name){toast('Isi nama penilaian dulu');return}
-  const a={id:uid(),classId:V.classId,subject:V.subject,name,type:$('#nType').value,weight:+$('#nW').value||10,source:'manual',manual:{}};
-  S.assessments.push(a);S.scores[a.id]={};save();render();
+  const name=(V.newName||'').trim();if(!name){toast('Isi nama penilaian dulu');return}
+  const types=V.newTypes.slice(),a={id:uid(),classId:V.classId,subject:V.subject,name,type:types[0],types,weight:isScored({types})?(Math.max(1,+V.newW)||10):0,source:'manual',manual:{}};
+  S.assessments.push(a);S.scores[a.id]={};S.notes[a.id]={};V.newName='';save();render();
+}
+function setNote(aid,sid,v){
+  S.notes[aid]=S.notes[aid]||{};
+  if(v.trim()==='')delete S.notes[aid][sid];else S.notes[aid][sid]=v.trim();
+  save();
 }
 function setW(id,v){const a=S.assessments.find(x=>x.id===id);a.weight=Math.max(1,+v||1);save();render()}
 function delAssess(id){const a=S.assessments.find(x=>x.id===id);if(!confirm(`Hapus penilaian "${a.name}" beserta semua nilainya?`))return;
-  S.assessments=S.assessments.filter(x=>x.id!==id);delete S.scores[id];save();render()}
+  S.assessments=S.assessments.filter(x=>x.id!==id);delete S.scores[id];delete S.notes[id];save();render()}
 function setScore(aid,sid,v){
   const a=S.assessments.find(x=>x.id===aid);S.scores[aid]=S.scores[aid]||{};
   if(v===''){delete S.scores[aid][sid]}else{S.scores[aid][sid]=Math.min(100,Math.max(0,+v))}
@@ -435,29 +466,34 @@ function setScore(aid,sid,v){
 }
 function exportNilai(){
   const as=S.assessments.filter(a=>a.classId===V.classId&&a.subject===V.subject);
-  const rows=[['Nama','NIS',...as.map(a=>`${a.name} (${a.weight}%)`),'Nilai akhir']];
-  clsStudents(V.classId).forEach(s=>rows.push([s.name,s.nis,...as.map(a=>S.scores[a.id]?.[s.id]??''),fmt(finalGrade(V.classId,V.subject,s.id))]));
+  const head=['No','Nama'];
+  as.forEach(a=>{if(isScored(a))head.push(`${a.name} (${a.weight}%)`);if(hasNote(a))head.push(`${a.name} - Catatan`)});
+  head.push('Nilai akhir');
+  const rows=[head];
+  clsStudents(V.classId).forEach((s,i)=>{const r=[noOf(s,i),s.name];
+    as.forEach(a=>{if(isScored(a))r.push(S.scores[a.id]?.[s.id]??'');if(hasNote(a))r.push(S.notes[a.id]?.[s.id]??'')});
+    r.push(fmt(finalGrade(V.classId,V.subject,s.id)));rows.push(r)});
   download(`nilai-${V.subject}.csv`,rows.map(r=>r.map(csvCell).join(',')).join('\n'));
 }
  
 /* ============ Aksi: data ============ */
 function addClass(){const n=$('#cName').value.trim();if(!n)return;const c={id:uid(),name:n};S.classes.push(c);V.classId=c.id;save();render()}
 function delClass(){const c=S.classes.find(x=>x.id===V.classId);if(!confirm(`Hapus kelas ${c.name} beserta murid, absensi, dan nilainya?`))return;
-  const aid=S.assessments.filter(a=>a.classId===c.id).map(a=>a.id);aid.forEach(i=>delete S.scores[i]);
+  const aid=S.assessments.filter(a=>a.classId===c.id).map(a=>a.id);aid.forEach(i=>{delete S.scores[i];delete S.notes[i]});
   S.assessments=S.assessments.filter(a=>a.classId!==c.id);S.students=S.students.filter(s=>s.classId!==c.id);
   Object.keys(S.attendance).forEach(k=>{if(k.startsWith(c.id+'|'))delete S.attendance[k]});
   S.classes=S.classes.filter(x=>x.id!==c.id);V.classId=S.classes[0]?.id;save();render()}
-function addStudent(){const n=$('#sName').value.trim();if(!n)return;S.students.push({id:uid(),nis:$('#sNis').value.trim(),name:n,classId:V.classId});save();render()}
+function addStudent(){const n=$('#sName').value.trim();if(!n)return;S.students.push({id:uid(),nis:$('#sNis').value.trim()||String(clsStudents(V.classId).length+1),name:n,classId:V.classId});save();render()}
 function bulkStudents(){
-  const lines=$('#bulk').value.split('\n').map(l=>l.trim()).filter(Boolean);let n=0;
-  lines.forEach(l=>{const m=l.split(/[,;\t]/);const nis=m.length>1?m[0].trim():'';const name=(m.length>1?m.slice(1).join(' '):m[0]).trim();if(name){S.students.push({id:uid(),nis,name,classId:V.classId});n++}});
+  const lines=$('#bulk').value.split('\n').map(l=>l.trim()).filter(Boolean);let n=0,cnt=clsStudents(V.classId).length;
+  lines.forEach(l=>{const m=l.split(/[,;\t]/);const nis=m.length>1?m[0].trim():'';const name=(m.length>1?m.slice(1).join(' '):m[0]).trim();if(name){S.students.push({id:uid(),nis:nis||String(++cnt),name,classId:V.classId});n++}});
   save();render();toast(n+' murid ditambahkan');
 }
 function delStudent(id){if(!confirm('Hapus murid ini?'))return;S.students=S.students.filter(s=>s.id!==id);save();render()}
 function addSubject(){const n=$('#mName').value.trim();if(!n||S.subjects.includes(n))return;S.subjects.push(n);V.subject=n;save();render()}
 function backup(){download('kelasku-cadangan.json',JSON.stringify(S),'application/json')}
-function restore(f){if(!f)return;f.text().then(t=>{try{S=JSON.parse(t.replace(/^\ufeff/,''));save();V.classId=S.classes[0]?.id;V.subject=S.subjects[0];render();toast('Data dipulihkan')}catch(e){toast('Berkas cadangan tidak valid')}})}
-function resetAll(){if(!confirm('Hapus SEMUA data di browser ini? Tindakan ini tidak bisa dibatalkan.'))return;S={classes:[],students:[],subjects:['Informatika'],assessments:[],scores:{},attendance:{},kkm:75,clientId:''};V.classId=undefined;V.subject='Informatika';save();render()}
+function restore(f){if(!f)return;f.text().then(t=>{try{S=fixS(JSON.parse(t.replace(/^\ufeff/,'')));save();V.classId=S.classes[0]?.id;V.subject=S.subjects[0];render();toast('Data dipulihkan')}catch(e){toast('Berkas cadangan tidak valid')}})}
+function resetAll(){if(!confirm('Hapus SEMUA data di browser ini? Tindakan ini tidak bisa dibatalkan.'))return;S={classes:[],students:[],subjects:['Informatika'],assessments:[],scores:{},notes:{},attendance:{},kkm:75,clientId:''};V.classId=undefined;V.subject='Informatika';save();render()}
  
 /* ============ Impor Google Form ============ */
 function formIdFromLink(l){const m=String(l).match(/\/forms\/d\/(?:e\/)?([\w-]{15,})/);return m?m[1]:''}
@@ -544,11 +580,11 @@ function loadDemo(){
   responses.push({vals:{nis:'999999',nama:'Murid Tidak Dikenal'},raw:7,time:200});
   if(sts[0])responses.push({vals:{nis:'',nama:sts[0].name.split(' ')[0]+' P.'},raw:6,time:201});
   responses.forEach(r=>r.score=r.raw/10*100);
-  startPreview({formId:'',title:'Kuis contoh',questions:[{id:'nis',title:'NIS'},{id:'nama',title:'Nama lengkap'}],responses,max:10});
+  startPreview({formId:'',title:'Kuis contoh',questions:[{id:'nis',title:'Nomor absen'},{id:'nama',title:'Nama lengkap'}],responses,max:10});
   render();
 }
 function startPreview(im){
-  im.idQ=(im.questions.find(q=>/nis|nisn/i.test(q.title))||im.questions.find(q=>/nama|name|email/i.test(q.title))||im.questions[0])?.id;
+  im.idQ=(im.questions.find(q=>/nomor|absen|\bnisn?\b|\bno\b/i.test(q.title))||im.questions.find(q=>/nama|name|email/i.test(q.title))||im.questions[0])?.id;
   im.policy='max';im.assign={};
   if(!V.imp.name)V.imp.name=im.title||'Kuis Google Form';
   V.im=im;
@@ -561,7 +597,7 @@ function computeMatches(){
     const raw=String(r.vals[im.idQ]??'').trim();let st=null,how='';
     if(im.assign[i]){st=sts.find(s=>s.id===im.assign[i]);how='manual'}
     else if(raw){
-      st=sts.find(s=>s.nis&&s.nis===raw);how=st?'NIS':'';
+      const rn=raw.replace(/^0+(?=\d)/,'');st=sts.find(s=>s.nis&&String(s.nis).replace(/^0+(?=\d)/,'')===rn);how=st?'No':'';
       if(!st){const n=norm(raw);
         st=sts.find(s=>norm(s.name)===n);if(st)how='nama';
         else if(n.length>=4){st=sts.find(s=>{const m=norm(s.name);return m.includes(n)||n.includes(m)});if(st)how='mirip'}}
@@ -577,8 +613,8 @@ function computeMatches(){
 function saveImport(){
   const im=V.im,p=V.imp,{pick}=computeMatches();
   let a=im.formId&&S.assessments.find(x=>x.formId===im.formId&&x.classId===V.classId&&x.subject===V.subject);
-  if(!a){a={id:uid(),classId:V.classId,subject:V.subject,name:p.name||'Kuis Google Form',type:p.type,weight:+p.weight||10,source:'google_form',formId:im.formId||'',manual:{}};
-    S.assessments.push(a);S.scores[a.id]={}}
+  if(!a){a={id:uid(),classId:V.classId,subject:V.subject,name:p.name||'Kuis Google Form',type:p.type,types:[p.type],weight:+p.weight||10,source:'google_form',formId:im.formId||'',manual:{}};
+    S.assessments.push(a);S.scores[a.id]={};S.notes[a.id]={}}
   let n=0,skip=0;
   Object.entries(pick).forEach(([sid,r])=>{if(a.manual?.[sid]){skip++;return}S.scores[a.id][sid]=Math.round(r.score*10)/10;n++});
   a.syncedAt=Date.now();save();V.im=null;V.imp.name='';V.tab='nilai';render();
@@ -586,7 +622,7 @@ function saveImport(){
 }
  
 /* ============ Impor murid dari file ============ */
-V.stu=null;
+V.stu=null;V.newTypes=['Tugas'];V.newName='';V.newW=10;
 function loadXLSX(){
   return new Promise((res,rej)=>{
     if(window.XLSX)return res();
@@ -599,7 +635,7 @@ function gridToStudents(grid){
   grid=grid.map(r=>r.map(c=>String(c??'').trim())).filter(r=>r.some(Boolean));
   if(!grid.length)return [];
   const h=grid[0].map(x=>x.toLowerCase());
-  let ni=h.findIndex(x=>/^(nis|nisn|no\.? ?induk)/.test(x)),nm=h.findIndex(x=>/nama|name/.test(x)),start=0;
+  let ni=h.findIndex(x=>/^(no\b|nomor|nis|nisn|absen)/.test(x)),nm=h.findIndex(x=>/nama|name/.test(x)),start=0;
   if(nm>=0){start=1}
   else if(grid[0].length>1){
     ni=0;nm=1;
@@ -626,10 +662,10 @@ async function readStudentFile(f){
   }catch(e){toast(e.message||'File tidak bisa dibaca')}
 }
 function stuCompute(){
-  const cur=clsStudents(V.classId),seenN=new Set(cur.map(s=>norm(s.name))),seenI=new Set(cur.filter(s=>s.nis).map(s=>s.nis));
+  const seenN=new Set(clsStudents(V.classId).map(s=>norm(s.name)));
   return V.stu.rows.map(r=>{
-    const dup=(r.nis&&seenI.has(r.nis))||seenN.has(norm(r.name));
-    if(!dup){seenN.add(norm(r.name));if(r.nis)seenI.add(r.nis)}
+    const dup=seenN.has(norm(r.name));
+    if(!dup)seenN.add(norm(r.name));
     return {...r,dup};
   });
 }
@@ -637,8 +673,8 @@ function stuPreviewHTML(){
   if(!V.stu)return '';
   const rows=stuCompute(),n=rows.filter(r=>!r.dup).length,d=rows.length-n;
   return `<div class="panel" style="margin:12px 0 0;background:var(--kertas)">
-    <p style="margin:0 0 8px"><b>${esc(V.stu.file)}</b>: ${rows.length} baris terbaca, <b>${n}</b> murid baru${d?`, ${d} dilewati karena sudah ada`:''}.</p>
-    <div class="scroll"><table><thead><tr><th>NIS</th><th>Nama</th><th>Status</th></tr></thead><tbody>
+    <p style="margin:0 0 8px"><b>${esc(V.stu.file)}</b>: ${rows.length} baris terbaca, <b>${n}</b> murid baru${d?`, ${d} dilewati karena namanya sudah ada`:''}.</p>
+    <div class="scroll"><table><thead><tr><th class="num">No</th><th>Nama</th><th>Status</th></tr></thead><tbody>
     ${rows.map(r=>`<tr><td>${esc(r.nis)||'<span class="muted">–</span>'}</td><td>${esc(r.name)}</td><td>${r.dup?'<span class="badge warn">Sudah ada</span>':'<span class="badge ok">Baru</span>'}</td></tr>`).join('')}
     </tbody></table></div>
     <div class="row" style="margin-top:10px"><button class="btn" onclick="saveStudentImport()" ${n?'':'disabled'}>Tambahkan ${n} murid</button><button class="btn ghost" onclick="V.stu=null;render()">Batal</button></div>
@@ -646,11 +682,11 @@ function stuPreviewHTML(){
 }
 function saveStudentImport(){
   const rows=stuCompute().filter(r=>!r.dup);
-  rows.forEach(r=>S.students.push({id:uid(),nis:r.nis,name:r.name,classId:V.classId}));
+  let cnt=clsStudents(V.classId).length;rows.forEach(r=>S.students.push({id:uid(),nis:r.nis||String(++cnt),name:r.name,classId:V.classId}));
   V.stu=null;save();render();toast(rows.length+' murid ditambahkan');
 }
 function downloadStudentTemplate(){
-  download('templat-murid.csv','NIS,Nama\n2024010,Aditya Pratama\n2024020,Bunga Lestari');
+  download('templat-murid.csv','No,Nama\n1,Aditya Pratama\n2,Bunga Lestari');
 }
  
 render();
@@ -659,4 +695,3 @@ render();
 </html>
  
 Claude selesai menulis balasan
-# Management-Teacher
